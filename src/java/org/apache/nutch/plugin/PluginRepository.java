@@ -92,7 +92,11 @@ public class PluginRepository {
   public static synchronized PluginRepository get(Configuration conf) {
     PluginRepository result = CACHE.get(conf);
     if (result == null) {
-      result = new PluginRepository(conf);
+      // If this class has been forced into "singleton" behavior, use that instance.
+      if ( singletonInstance != null )
+        result = singletonInstance;
+      else
+        result = new PluginRepository(conf);
       CACHE.put(conf, result);
     }
     return result;
@@ -415,5 +419,28 @@ public class PluginRepository {
     String[] subargs = new String[args.length - 2];
     System.arraycopy(args, 2, subargs, 0, subargs.length);
     m.invoke(null, new Object[] { subargs });
+  }
+
+  /***********************************************************************
+  * Force this class into singleton behavior instead of the default Hadoop
+  * behavior of creating a repository for every NutchJob.  The default
+  * behavior is good for distributed work environments, but leaks classes
+  * badly in a single machine environment, and eventually PermGen memory
+  * is exhausted.
+  ***********************************************************************/
+  private static PluginRepository singletonInstance = null;
+  public static synchronized PluginRepository createSingleton( Configuration conf )
+  {
+    LOG.info( "Create singleton instance of PluginRepository" );
+
+    singletonInstance = new PluginRepository(conf);
+
+    return( singletonInstance );
+  }
+
+  public static void clearSingleton()
+  {
+    LOG.info( "Clearing singleton instance of PluginRepository" );
+    singletonInstance = null;
   }
 }

@@ -82,7 +82,7 @@ public final class HitDetails implements Writable {
    return (vals.size() > 0)
             ? (String[]) vals.toArray(new String[vals.size()])
             : null;
-}
+  }
 
   // javadoc from Writable
   public void write(DataOutput out) throws IOException {
@@ -131,6 +131,45 @@ public final class HitDetails implements Writable {
     return buffer.toString();
   }
   
+  /*********************************************************************************
+  LIJIT:
+  *********************************************************************************/
+  public boolean hasNonEmptyValue( String fieldName )
+  {
+    for ( int i = 0; i < length; i++ )
+    {
+      if ( fields[i].equals(fieldName) &&
+           values[i] != null &&
+           !values[i].equals("") )
+        return( true );
+    }
+    return( false );
+  }
 
+  public String getNonEmptyValue( String fieldName )
+  {
+    String value = null;
+    for ( int i = 0; i < length && value == null; i++ )
+    {
+      if ( fields[i].equals(fieldName) &&
+           values[i] != null &&
+           !values[i].equals("") )
+        value = values[i];
+    }
+    return( value );
+  }
 
+  public boolean replaceValue( String fieldName, String oldValue, String newValue )
+  {
+    boolean replaced = false;
+    for ( int i = 0; i < length; i++ )
+    {
+      if ( fields[i].equals(fieldName) && values[i].equals(oldValue) )
+      {
+        values[i] = newValue;
+        replaced = true;
+      }
+    }
+    return( replaced );
+  }
 }

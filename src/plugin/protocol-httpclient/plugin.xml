@@ -17,7 +17,7 @@
 -->
 <plugin
    id="protocol-httpclient"
-   name="Http / Https Protocol Plug-in"
+   name="(** Lijit: https only! **) Http / Https Protocol Plug-in"
    version="1.0.0"
    provider-name="nutch.org">
 
@@ -32,6 +32,7 @@
       <import plugin="lib-http"/>
    </requires>
 
+   <!-- use the original http client unless we need https...
    <extension id="org.apache.nutch.protocol.httpclient"
               name="HttpProtocol"
               point="org.apache.nutch.protocol.Protocol">
@@ -42,6 +43,7 @@
       </implementation>
 
    </extension>
+   -->
 
    <extension id="org.apache.nutch.protocol.https"
               name="HttpsProtocol"

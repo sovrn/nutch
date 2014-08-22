@@ -17,8 +17,7 @@
 
 package org.apache.nutch.parse.zip;
 
-import java.io.ByteArrayInputStream;
-import java.io.InputStream;
+import java.io.*;
 import java.util.Properties;
 import java.util.ArrayList;
 import java.util.List;

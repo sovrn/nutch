@@ -30,6 +30,7 @@
   import="org.apache.nutch.clustering.*"
   import="org.apache.hadoop.conf.*"
   import="org.apache.nutch.util.NutchConfiguration"
+  import="com.lijit.nutch.reportscrawler.nutchsearcher.NutchBean"
 
 %><%
   Configuration nutchConf = NutchConfiguration.get(application);
@@ -142,6 +143,18 @@
 <script type="text/javascript">
 <!--
 function queryfocus() { document.search.query.focus(); }
+
+function setLijit( searchtype )
+{
+  var hash = "";
+  for ( i=0; i<document.search.lijituser.length; i++ )
+  {
+    if ( document.search.lijituser[i].checked == true )
+    {
+      document.search.query.value = document.search.query.value + ' ' + searchtype + ':' + document.search.lijituser[i].value;
+    }
+  }
+}
 // -->
 </script>
 </head>
@@ -154,11 +167,12 @@ function queryfocus() { document.search.query.focus(); }
  <input name="query" size=44 value="<%=htmlQueryString%>">
  <input type="hidden" name="hitsPerPage" value="<%=hitsPerPage%>">
  <input type="hidden" name="lang" value="<%=language%>">
- <input type="submit" value="<i18n:message key="search"/>">
+ <input type="submit" value="<i18n:message key="search"/>"><br>
  <% if (clusteringAvailable) { %>
    <input id="clustbox" type="checkbox" name="clustering" value="yes" <% if (clustering.equals("yes")) { %>CHECKED<% } %>>
     <label for="clustbox"><i18n:message key="clustering"/></label>
  <% } %>
+ <br/>Show all hits from sites: <input type="checkbox" name="hitsPerSite" value="0" <%  if (hitsPerSite==0) out.print( "checked=\"yes\"" ); %>/><br/>
  <a href="help.html">help</a>
  </form>
 
@@ -227,7 +241,9 @@ out.flush();
     String title = detail.getValue("title");
     String url = detail.getValue("url");
     String id = "idx=" + hit.getIndexNo() + "&id=" + hit.getIndexDocNo();
-    String summary = summaries[i].toHtml(true);
+    String summary = "";
+    if ( summaries[i] != null )
+       summary = summaries[i].toHtml(true);
     String caching = detail.getValue("cache");
     boolean showSummary = true;
     boolean showCached = true;
@@ -235,6 +251,9 @@ out.flush();
       showSummary = !caching.equals(Nutch.CACHING_FORBIDDEN_ALL);
       showCached = !caching.equals(Nutch.CACHING_FORBIDDEN_NONE);
     }
+
+    String informers = detail.getValue("lijitnames");
+    String tags = detail.getValue("lijittags");
 
     if (title == null || title.equals("")) {      // use url for docs w/o title
       title = url;
@@ -245,6 +264,11 @@ out.flush();
     <% if (!"".equals(summary) && showSummary) { %>
     <br><%=summary%>
     <% } %>
+    <br>informers: <%=informers%>
+    <%
+       if ( tags != null )
+          out.print( "<br>tags: " + tags );
+    %>
     <br>
     <span class="url"><%=Entities.encode(url)%></span>
     <%

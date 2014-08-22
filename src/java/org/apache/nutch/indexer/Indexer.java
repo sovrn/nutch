@@ -38,6 +38,7 @@ import org.apache.nutch.scoring.ScoringFilters;
 import org.apache.nutch.util.LogUtil;
 import org.apache.nutch.util.NutchConfiguration;
 import org.apache.nutch.util.NutchJob;
+import org.apache.nutch.util.SimilarityFactory;
 
 import org.apache.nutch.crawl.CrawlDatum;
 import org.apache.nutch.crawl.CrawlDb;
@@ -56,6 +57,10 @@ public class Indexer extends ToolBase implements Reducer, Mapper {
 
   public static final Log LOG = LogFactory.getLog(Indexer.class);
 
+  // LIJIT: make the similarity class configurable:
+  protected static String similarityClassName = NutchSimilarity.class.getName();
+  // /LIJIT
+
   /** Unwrap Lucene Documents created by reduce and add them to an index. */
   public static class OutputFormat
     extends org.apache.hadoop.mapred.OutputFormatBase {
@@ -72,6 +77,7 @@ public class Indexer extends ToolBase implements Reducer, Mapper {
         new IndexWriter(fs.startLocalOutput(perm, temp).toString(),
                         new NutchDocumentAnalyzer(job), true);
 
+
       writer.setMergeFactor(job.getInt("indexer.mergeFactor", 10));
       writer.setMaxBufferedDocs(job.getInt("indexer.minMergeDocs", 100));
       writer.setMaxMergeDocs(job.getInt("indexer.maxMergeDocs", Integer.MAX_VALUE));
@@ -80,7 +86,10 @@ public class Indexer extends ToolBase implements Reducer, Mapper {
       writer.setMaxFieldLength(job.getInt("indexer.max.tokens", 10000));
       writer.setInfoStream(LogUtil.getInfoStream(LOG));
       writer.setUseCompoundFile(false);
-      writer.setSimilarity(new NutchSimilarity());
+      
+      // LIJIT: make the similarity class configurable:
+      writer.setSimilarity( SimilarityFactory.getSimilarity( similarityClassName ) );
+      // /LIJIT
 
       return new RecordWriter() {
           boolean closed;
@@ -136,12 +145,18 @@ public class Indexer extends ToolBase implements Reducer, Mapper {
   
   public Indexer(Configuration conf) {
     setConf(conf);
+    // LIJIT: make the similarity class configurable:
+    this.similarityClassName = conf.get( "indexer.similarityclass", similarityClassName );
+    // /LIJIT
   }
   
   public void configure(JobConf job) {
     setConf(job);
     this.filters = new IndexingFilters(getConf());
     this.scfilters = new ScoringFilters(getConf());
+    // LIJIT: make the similarity class configurable:
+    this.similarityClassName = conf.get( "indexer.similarityclass", similarityClassName );
+    // /LIJIT
   }
 
   public void close() {}
@@ -149,10 +164,12 @@ public class Indexer extends ToolBase implements Reducer, Mapper {
   public void reduce(WritableComparable key, Iterator values,
                      OutputCollector output, Reporter reporter)
     throws IOException {
+    LOG.debug( "---------------------------------------------------------------------------------------------------" );
+    LOG.debug( "REDUCE: " + key );
+
     Inlinks inlinks = null;
     CrawlDatum dbDatum = null;
     CrawlDatum fetchDatum = null;
-    CrawlDatum redir = null;
     ParseData parseData = null;
     ParseText parseText = null;
     while (values.hasNext()) {
@@ -162,30 +179,73 @@ public class Indexer extends ToolBase implements Reducer, Mapper {
       } else if (value instanceof CrawlDatum) {
         CrawlDatum datum = (CrawlDatum)value;
         if (CrawlDatum.hasDbStatus(datum))
+        {
           dbDatum = datum;
+          if ( LOG.isDebugEnabled() ) LOG.debug("hasDbStatus: " + key + "\n" + datum ); // LIJIT
+        }
         else if (CrawlDatum.hasFetchStatus(datum))
+        {
           fetchDatum = datum;
-        else if (CrawlDatum.STATUS_LINKED == datum.getStatus())
-          // redirected page
-          redir = datum;
+          if ( LOG.isDebugEnabled() ) LOG.debug("hasFetchStatus: " + key + "\n" + datum ); // LIJIT
+        }
+        /* LIJIT: don't freak out if this has linked status in the crawl datum...
+                  It's not really a redirect.                                           */
+        else if ( CrawlDatum.STATUS_LINKED == datum.getStatus() ||
+                  CrawlDatum.STATUS_SIGNATURE == datum.getStatus() )
+        {
+          if ( LOG.isDebugEnabled() ) LOG.debug( "skipping linked/signature crawl datum" );
+          continue;
+        }
+        /* LIJIT end */
         else
+        {
           throw new RuntimeException("Unexpected status: "+datum.getStatus());
+        }
       } else if (value instanceof ParseData) {
         parseData = (ParseData)value;
+        if ( LOG.isDebugEnabled() ) LOG.debug( "parse data: " + parseData );   // LIJIT
       } else if (value instanceof ParseText) {
         parseText = (ParseText)value;
+        if ( LOG.isDebugEnabled() ) LOG.debug( "parse text: " + parseText );   // LIJIT
       } else if (LOG.isWarnEnabled()) {
         LOG.warn("Unrecognized type: "+value.getClass());
       }
     }      
-    if (redir != null) {
-      // XXX page was redirected - what should we do?
-      // XXX discard it for now
-      return;
+
+    /* LIJIT:
+       For some reason, Nutch has the habit of fetching the same page multiple times.  It's
+       not clear why this happens, but it could cause the crawler to go on and on fetching
+       pages it already has.  Soooo....
+       We keep track of the fetched pages in memory, and at the URLFilter step will filter
+       out already fetched pages.
+       This has the problem, though, of occasionally causing Nutch to discard the fetchDatum
+       it already had for the page (must have something to do with multiple cycles of map/reduce
+       while crawling).  So in such cases, we'll have everything but a fetchDatum.
+       If we don't have the fetch datum, but have everything else and a crawl db
+       status of "fetched", simulate a fetch datum by cloning the db datum  */
+    if ( fetchDatum == null && parseText != null && parseData != null &&
+         dbDatum != null && dbDatum.getStatus() == CrawlDatum.STATUS_DB_FETCHED )
+    {
+       fetchDatum = (CrawlDatum)dbDatum.clone();
+       fetchDatum.setStatus( CrawlDatum.STATUS_FETCH_SUCCESS );
     }
+
+    // When reindexing we almost always are missing crawl db and fetch CrawlDatum objects
+    if ( fetchDatum == null )
+       fetchDatum = new CrawlDatum( CrawlDatum.STATUS_FETCH_SUCCESS, 365L );
+    if ( dbDatum == null )
+       dbDatum = new CrawlDatum( CrawlDatum.STATUS_FETCH_SUCCESS, 365L );
+    /* end LIJIT */
 
     if (fetchDatum == null || dbDatum == null
         || parseText == null || parseData == null) {
+      /* LIJIT:  Extra logging  */
+      LOG.debug( "Indexer: skipping document: " + key );
+      if ( fetchDatum == null ) LOG.debug( "Indexer: null fetchDatum" );
+      if ( dbDatum == null ) LOG.debug( "Indexer: null dbDatum" );
+      if ( parseText == null ) LOG.debug( "Indexer: null parseText" );
+      if ( parseData == null ) LOG.debug( "Indexer: null parseData" );
+      /* end lijit */
       return;                                     // only have inlinks
     }
 
@@ -193,8 +253,10 @@ public class Indexer extends ToolBase implements Reducer, Mapper {
     Metadata metadata = parseData.getContentMeta();
 
     // add segment, used to map from merged index back to segment files
+    /* LIJIT: index the segment field untokenized   */
+    LOG.debug( "Indexer: indexing the segment field");
     doc.add(new Field("segment", metadata.get(Nutch.SEGMENT_NAME_KEY),
-            Field.Store.YES, Field.Index.NO));
+            Field.Store.YES, Field.Index.UN_TOKENIZED));
 
     // add digest, used by dedup
     doc.add(new Field("digest", metadata.get(Nutch.SIGNATURE_KEY),
@@ -220,6 +282,9 @@ public class Indexer extends ToolBase implements Reducer, Mapper {
 
     float boost = 1.0f;
     // run scoring filters
+    // LIJIT: skip scoring of documents; because we don't have a full
+    // page link graph (incomplete page rank), make all documents score 1.0
+    /*
     try {
       boost = this.scfilters.indexerScore((Text)key, doc, dbDatum,
               fetchDatum, parse, inlinks, boost);
@@ -229,6 +294,8 @@ public class Indexer extends ToolBase implements Reducer, Mapper {
       }
       return;
     }
+    */
+    /*  END LIJIT  */
     // apply boost to all indexed fields.
     doc.setBoost(boost);
     // store boost for use by explain and dedup
@@ -240,6 +307,8 @@ public class Indexer extends ToolBase implements Reducer, Mapper {
 
   public void index(Path indexDir, Path crawlDb, Path linkDb, Path[] segments)
     throws IOException {
+
+    FileSystem fs = FileSystem.get( conf );
 
     if (LOG.isInfoEnabled()) {
       LOG.info("Indexer: starting");
@@ -253,13 +322,25 @@ public class Indexer extends ToolBase implements Reducer, Mapper {
       if (LOG.isInfoEnabled()) {
         LOG.info("Indexer: adding segment: " + segments[i]);
       }
-      job.addInputPath(new Path(segments[i], CrawlDatum.FETCH_DIR_NAME));
+
+      // When reindexing, we probably don't have a fetch datum DB
+      Path fetchDB = new Path( segments[i], CrawlDatum.FETCH_DIR_NAME );
+      if ( fs.exists( fetchDB ) )
+         job.addInputPath(new Path(segments[i], CrawlDatum.FETCH_DIR_NAME));
+      else
+         LOG.info( "no fetch dir" );
+
       job.addInputPath(new Path(segments[i], ParseData.DIR_NAME));
       job.addInputPath(new Path(segments[i], ParseText.DIR_NAME));
     }
 
-    job.addInputPath(new Path(crawlDb, CrawlDb.CURRENT_NAME));
-    job.addInputPath(new Path(linkDb, LinkDb.CURRENT_NAME));
+    // LIJIT:
+    // When reindexing, we don't have a crawl DB or link DB
+    if ( crawlDb != null )
+       job.addInputPath(new Path(crawlDb, CrawlDb.CURRENT_NAME));
+    if ( linkDb != null )
+       job.addInputPath(new Path(linkDb, LinkDb.CURRENT_NAME));
+    // /LIJIT
     job.setInputFormat(SequenceFileInputFormat.class);
 
     job.setMapperClass(Indexer.class);

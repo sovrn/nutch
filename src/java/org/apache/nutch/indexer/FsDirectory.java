@@ -240,6 +240,12 @@ public class FsDirectory extends Directory {
       out.close();                                // close the file
     }
 
+    //LIJIT: implement for lucene 2.9
+    public void flushBuffer(byte[] b, int offset, int size) throws IOException {
+      out.write(b, offset, size);
+    }
+    // END LIJIT
+
   }
 
 }

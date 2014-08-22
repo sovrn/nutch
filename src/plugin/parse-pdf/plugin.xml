@@ -26,8 +26,11 @@
       <library name="parse-pdf.jar">
          <export name="*"/>
       </library>
-      <library name="PDFBox-0.7.2-log4j.jar"/>
+      <library name="pdfbox-1.6.0.jar"/>
       <library name="log4j-1.2.9.jar"/>
+      <library name="fontbox-1.6.0.jar"/>
+      <library name="bcprov-jdk16-146.jar"/>
+      <library name="bcmail-jdk16-146.jar"/>
    </runtime>
 
    <requires>

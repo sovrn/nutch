@@ -37,6 +37,7 @@ import org.apache.nutch.protocol.ProtocolException;
 import org.apache.nutch.protocol.ProtocolOutput;
 import org.apache.nutch.protocol.ProtocolStatus;
 import org.apache.nutch.protocol.RobotRules;
+import org.apache.nutch.protocol.CookieStore;
 import org.apache.nutch.util.GZIPUtils;
 import org.apache.nutch.util.LogUtil;
 
@@ -111,7 +112,7 @@ public abstract class HttpBase implements Protocol {
    * from BLOCKED_ADDR_TO_TIME, ordered by increasing time.
    */
   private static LinkedList BLOCKED_ADDR_QUEUE = new LinkedList();
-  
+
   /** The default logger */
   private final static Log LOGGER = LogFactory.getLog(HttpBase.class);
 
@@ -184,7 +185,20 @@ public abstract class HttpBase implements Protocol {
     String urlString = url.toString();
     try {
       URL u = new URL(urlString);
-      
+
+      // Hack!  Need to get large sitemap files but there are several levels of Factories with
+      // static table for Protocol lookup. We don't want to always retrieve huge content
+      // so we have this limit changed down at this level
+      if ( urlString.endsWith( ".xml" ) ||
+           urlString.endsWith( ".xml.gz" ) )
+      {
+          maxContent = conf.getInt( "http.xmlcontent.limit", 5000 * 1024 );
+      }
+      else
+      {
+          maxContent = conf.getInt("http.content.limit", 64 * 1024);
+      }
+
       if (checkRobots) {
         try {
           if (!robots.isAllowed(this, u)) {
@@ -227,6 +241,17 @@ public abstract class HttpBase implements Protocol {
                               (content == null ? EMPTY_CONTENT : content),
                               response.getHeader("Content-Type"),
                               response.getHeaders(), this.conf);
+
+      // Save the cookies
+      if ( conf.getBoolean( "http.savecookies", false ) )
+      {
+         String[] cookies = response.getHeaders().getValues( "Set-Cookie" );
+         if ( cookies != null )
+         {
+            for ( String cookie : cookies )
+               CookieStore.saveCookie( urlString, cookie );
+         }
+      }
       
       if (code == 200) { // got a good response
         return new ProtocolOutput(c); // return it

@@ -26,6 +26,7 @@
   import="org.apache.nutch.searcher.*"
   import="org.apache.hadoop.conf.Configuration"
   import="org.apache.nutch.util.NutchConfiguration"
+  import="com.lijit.nutch.reportscrawler.nutchsearcher.NutchBean"
 %><%
   Configuration nutchConf = NutchConfiguration.get(application);
   NutchBean bean = NutchBean.get(application, nutchConf);

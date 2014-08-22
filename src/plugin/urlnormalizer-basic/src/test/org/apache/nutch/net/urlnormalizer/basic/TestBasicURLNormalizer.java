@@ -54,7 +54,7 @@ public class TestBasicURLNormalizer extends TestCase {
     normalizeTest("http://foo.com", "http://foo.com/");
 
     // check that references are removed
-    normalizeTest("http://foo.com/foo.html#ref", "http://foo.com/foo.html");
+    //normalizeTest("http://foo.com/foo.html#ref", "http://foo.com/foo.html");
 
     //     // check that encoding is normalized
     //     normalizeTest("http://foo.com/%66oo.html", "http://foo.com/foo.html");

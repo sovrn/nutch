@@ -63,13 +63,23 @@ public class IndexSorter extends ToolBase {
 
     private static final String TEMP_FILE = "temp";
     private final RAMDirectory tempDir = new RAMDirectory();
-    private final RAMOutputStream out =
-      (RAMOutputStream)tempDir.createOutput(TEMP_FILE);
+    private RAMOutputStream out = null;
+
     private IndexInput in;
 
     public SortedTermPositions(TermPositions original, int[] oldToNew) {
       this.original = original;
       this.oldToNew = oldToNew;
+      // LIJIT: createOutput now throws an IOException
+      try
+      {
+        out = (RAMOutputStream)tempDir.createOutput(TEMP_FILE);
+      }
+      catch (Exception e)
+      {
+        LOG.error("Error creating temporary output: " + StringUtils.stringifyException(e));
+      }
+      // END LIJIT
     }
 
     public void seek(Term term) throws IOException {
@@ -149,6 +159,22 @@ public class IndexSorter extends ToolBase {
       original.close();
     }
 
+    //LIJIT: implement for lucene 2.9
+    public boolean isPayloadAvailable()
+    {
+       return( false );
+    }
+
+    public byte[] getPayload( byte[] data, int offset )
+    {
+       return( null );
+    }
+
+    public int getPayloadLength() 
+    {
+       return( 0 );
+    }
+    // END LIJIT
   }
 
   private static class SortingReader extends FilterIndexReader {

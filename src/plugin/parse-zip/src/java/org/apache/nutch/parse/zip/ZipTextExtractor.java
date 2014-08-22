@@ -20,9 +20,9 @@ package org.apache.nutch.parse.zip;
 // JDK imports
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
 import java.util.List;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
+import java.util.zip.GZIPInputStream;
 import java.net.URL;
 
 // Commons Logging imports
@@ -68,35 +68,42 @@ private Configuration conf;
     String resultText = "";
     byte temp;
     
-    ZipInputStream zin = new ZipInputStream(input);
-    
-    ZipEntry entry;
-    
-    while ((entry = zin.getNextEntry()) != null) {
-      
-      if (!entry.isDirectory()) {
-        int size = (int) entry.getSize();
-        byte[] b = new byte[size];
-        for(int x = 0; x < size; x++) {
-          int err = zin.read();
-          if(err != -1) {
-            b[x] = (byte)err;
-          }
+    int sChunk = 32768;
+    GZIPInputStream zipin = new GZIPInputStream(input);
+    byte[] buffer = new byte[sChunk];
+    ByteArrayOutputStream out = new ByteArrayOutputStream();
+    int length;
+    while ((length = zipin.read(buffer, 0, sChunk)) != -1)
+      out.write(buffer, 0, length);
+    out.close();
+    zipin.close();
+
+    byte[] unzipBytes = out.toByteArray();
+    // strip .gz
+    String newurl = url.substring( 0, url.length()-3 );
+    if (LOG.isDebugEnabled()) 
+    {
+        LOG.debug( "ZipTextExt gunzip byte count " + unzipBytes.length + "newurl=" + newurl );
+    }
+    URL aURL = new URL(newurl);
+    String fname = aURL.getPath();
+    int pos = fname.lastIndexOf( '/' );
+    fname = fname.substring( pos+1 );
+    String base = aURL.toString();
+    int i = base.lastIndexOf('.');
+    if (i != -1)
+    {
+        // Trying to resolve the Mime-Type
+        String contentType = MIME.getMimeType(fname).getName();
+        if (LOG.isDebugEnabled()) 
+        {
+            LOG.debug( "ZipTextExt fname " + fname + " MIME " + contentType );
         }
-        String newurl = url + "/";
-        String fname = entry.getName();
-        newurl += fname;
-        URL aURL = new URL(newurl);
-        String base = aURL.toString();
-        int i = fname.lastIndexOf('.');
-        if (i != -1) {
-          // Trying to resolve the Mime-Type
-          String contentType = MIME.getMimeType(fname).getName();
-          try {
+        try {
             Metadata metadata = new Metadata();
-            metadata.set(Response.CONTENT_LENGTH, Long.toString(entry.getSize()));
+            metadata.set(Response.CONTENT_LENGTH, Long.toString( unzipBytes.length ));
             metadata.set(Response.CONTENT_TYPE, contentType);
-            Content content = new Content(newurl, base, b, contentType, metadata, this.conf);
+            Content content = new Content(newurl, base, unzipBytes, contentType, metadata, this.conf);
             Parse parse = new ParseUtil(this.conf).parse(content);
             ParseData theParseData = parse.getData();
             Outlink[] theOutlinks = theParseData.getOutlinks();
@@ -105,14 +112,12 @@ private Configuration conf;
               outLinksList.add(new Outlink(theOutlinks[count].getToUrl(), theOutlinks[count].getAnchor(), this.conf));
             }
             
-            resultText += entry.getName() + " " + parse.getText() + " ";
+            resultText += fname + " " + parse.getText() + " ";
           } catch (ParseException e) {
             if (LOG.isInfoEnabled()) { 
               LOG.info("fetch okay, but can't parse " + fname + ", reason: " + e.getMessage());
             }
           }
-        }
-      }
     }
     
     return resultText;

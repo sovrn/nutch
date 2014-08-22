@@ -109,16 +109,18 @@ public class BasicURLNormalizer implements URLNormalizer {
                 changed = true;
             }
 
-            if (url.getRef() != null) {                 // remove the ref
-                changed = true;
-            }
-
             // check for unnecessary use of "/../"
             String file2 = substituteUnnecessaryRelativePaths(file);
 
             if (!file.equals(file2)) {
                 changed = true;
                 file = file2;
+            }
+
+            if (url.getRef() != null) {                 // handle the ref (fragment/anchor/hash)
+                LOG.debug( "Adding reference back to URL: '" + url.getRef() + "'" );
+                file += "#" + url.getRef();
+                changed = true;
             }
 
         }

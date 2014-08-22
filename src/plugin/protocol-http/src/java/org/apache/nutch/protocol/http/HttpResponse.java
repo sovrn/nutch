@@ -33,6 +33,7 @@ import org.apache.nutch.crawl.CrawlDatum;
 import org.apache.nutch.metadata.Metadata;
 import org.apache.nutch.metadata.SpellCheckedMetadata;
 import org.apache.nutch.net.protocols.Response;
+import org.apache.nutch.protocol.CookieStore;
 import org.apache.nutch.protocol.ProtocolException;
 import org.apache.nutch.protocol.http.api.HttpBase;
 import org.apache.nutch.protocol.http.api.HttpException;
@@ -121,6 +122,16 @@ public class HttpResponse implements Response {
         reqStr.append("User-Agent: ");
         reqStr.append(userAgent);
         reqStr.append("\r\n");
+      }
+
+      // Build the cookies header
+      String[] cookies = CookieStore.getCookies( url );
+      if ( cookies != null && cookies.length != 0 )
+      {
+         reqStr.append( "Cookie: " );
+         for ( String cookie : cookies )
+            reqStr.append( cookie + ";" );
+         reqStr.append("\r\n");
       }
 
       reqStr.append("\r\n");

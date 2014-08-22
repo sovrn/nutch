@@ -56,7 +56,8 @@ public class TestRobotRulesParser extends TestCase {
     + "#Disallow: /c" + CR 
     + "" + CR 
     + "" + CR 
-    + "User-Agent: Agent2 Agent3#foo" + CR 
+    + "User-Agent: Agent2" + CR 
+    + "User-Agent: Agent3#foo" + CR 
     + "User-Agent: Agent4" + CR 
     + "Disallow: /d" + CR 
     + "Disallow: /e/d/" + CR

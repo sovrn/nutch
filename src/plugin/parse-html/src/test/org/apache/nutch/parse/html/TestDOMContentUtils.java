@@ -219,11 +219,30 @@ public class TestDOMContentUtils extends TestCase {
     super(name); 
   }
 
+  // LIJIT:
+  private static void configureParser( DOMFragmentParser parser )
+  {
+    /*  We could potentially turn off balancing tags in the parser to fix
+        testGetOutlinks test case #3, but that then breaks #4.  So instead
+        we'll just fix the expected output from #3 to match the new neko parser.
+    try
+    {
+       parser.setFeature("http://cyberneko.org/html/features/balance-tags",false);
+    }
+    catch ( Exception e )
+    {
+       System.out.println( "bummer; failed to set balance-tags=false" );
+       e.printStackTrace();
+    }*/
+  }
+  // END LIJIT
+
   private static void setup() {
     conf = NutchConfiguration.create();
     conf.setBoolean("parser.html.form.use_action", true);
     utils = new DOMContentUtils(conf);
     DOMFragmentParser parser= new DOMFragmentParser();
+    configureParser( parser );  // LIJIT
     for (int i= 0; i < testPages.length; i++) {
         DocumentFragment node= 
           new HTMLDocumentImpl().createDocumentFragment();
@@ -253,8 +272,10 @@ public class TestDOMContentUtils extends TestCase {
          },
          {
            new Outlink("http://www.nutch.org/", "home", conf),
+           new Outlink("http://www.nutch.org/", "", conf),       // LIJIT: new neko parser adds an outlink with empty anchor
            new Outlink("http://www.nutch.org/docs/1", "1", conf),
-           new Outlink("http://www.nutch.org/docs/2", "2", conf),
+           new Outlink("http://www.nutch.org/docs/1", "", conf),
+           new Outlink("http://www.nutch.org/docs/2", "2", conf),// LIJIT: new neko parser adds an outlink with empty anchor
          },
          {
            new Outlink("http://www.nutch.org/frames/top.html", "", conf),
@@ -317,6 +338,7 @@ public class TestDOMContentUtils extends TestCase {
     if (testDOMs[0] == null) 
       setup();
     for (int i= 0; i < testPages.length; i++) {
+      System.out.println( "testGetText #" + i );
       StringBuffer sb= new StringBuffer();
       utils.getText(sb, testDOMs[i]);
       String text= sb.toString();
@@ -332,6 +354,7 @@ public class TestDOMContentUtils extends TestCase {
     if (testDOMs[0] == null) 
       setup();
     for (int i= 0; i < testPages.length; i++) {
+      System.out.println( "testGetTitle #" + i );
       StringBuffer sb= new StringBuffer();
       utils.getTitle(sb, testDOMs[i]);
       String text= sb.toString();
@@ -347,6 +370,7 @@ public class TestDOMContentUtils extends TestCase {
     if (testDOMs[0] == null) 
       setup();
     for (int i= 0; i < testPages.length; i++) {
+      System.out.println( "testGetOutlinks #" + i );
       ArrayList outlinks= new ArrayList();
       if (i == SKIP) {
         conf.setBoolean("parser.html.form.use_action", false);

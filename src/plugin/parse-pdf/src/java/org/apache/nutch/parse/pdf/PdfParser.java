@@ -17,14 +17,16 @@
 
 package org.apache.nutch.parse.pdf;
 
-import org.pdfbox.encryption.DocumentEncryption;
-import org.pdfbox.pdfparser.PDFParser;
-import org.pdfbox.pdmodel.PDDocument;
-import org.pdfbox.pdmodel.PDDocumentInformation;
-import org.pdfbox.util.PDFTextStripper;
+import org.apache.pdfbox.pdmodel.encryption.BadSecurityHandlerException;
+import org.apache.pdfbox.pdmodel.encryption.StandardDecryptionMaterial;
+import org.apache.pdfbox.encryption.DocumentEncryption;
+import org.apache.pdfbox.pdfparser.PDFParser;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDDocumentInformation;
+import org.apache.pdfbox.util.PDFTextStripper;
 
-import org.pdfbox.exceptions.CryptographyException;
-import org.pdfbox.exceptions.InvalidPasswordException;
+import org.apache.pdfbox.exceptions.CryptographyException;
+import org.apache.pdfbox.exceptions.InvalidPasswordException;
 
 // Commons Logging imports
 import org.apache.commons.logging.Log;
@@ -51,7 +53,7 @@ import java.io.IOException;
 
 /*********************************************
  * parser for mime type application/pdf.
- * It is based on org.pdfbox.*. We have to see how well it does the job.
+ * It is based on org.apache.pdfbox.*. We have to see how well it does the job.
  * 
  * @author John Xing
  *
@@ -95,7 +97,8 @@ public class PdfParser implements Parser {
       if (pdf.isEncrypted()) {
         DocumentEncryption decryptor = new DocumentEncryption(pdf);
         //Just try using the default password and move on
-        decryptor.decryptDocument("");
+        pdf.openProtection(new StandardDecryptionMaterial(""));
+        //decryptor.decryptDocument("");
       }
 
       // collect text
@@ -122,9 +125,9 @@ public class PdfParser implements Parser {
     } catch (CryptographyException e) {
       return new ParseStatus(ParseStatus.FAILED,
               "Error decrypting document. " + e).getEmptyParse(getConf());
-    } catch (InvalidPasswordException e) {
+/*    } catch (InvalidPasswordException e) {
       return new ParseStatus(ParseStatus.FAILED,
-              "Can't decrypt document - invalid password. " + e).getEmptyParse(getConf());
+              "Can't decrypt document - invalid password. " + e).getEmptyParse(getConf());*/
     } catch (Exception e) { // run time exception
         if (LOG.isWarnEnabled()) {
           LOG.warn("General exception in PDF parser: "+e.getMessage());

@@ -24,6 +24,7 @@
   import="org.apache.nutch.searcher.*"
   import="org.apache.hadoop.conf.Configuration"
   import="org.apache.nutch.util.NutchConfiguration"
+  import="com.lijit.nutch.reportscrawler.nutchsearcher.NutchBean"
 %><%
   Configuration nutchConf = NutchConfiguration.get(application);
   NutchBean bean = NutchBean.get(application, nutchConf);
@@ -75,6 +76,29 @@
 </h3>
 
 <%=bean.getExplanation(query, hit)%>
+
+<br>
+<br>
+<br>
+<h3>Look up informer hashes:</h3>
+<blockquote>
+<%
+   String[] informerFields = details.getValues( "lijitinformer" );
+   for ( int i=0; informerFields != null && i<informerFields.length; i++ )
+   {
+      String field = informerFields[i];
+      int ndx = field.indexOf(',');
+      if ( ndx > 0 )
+      {
+         %>
+         <a href="http://www.lijit.com/admin_console/informer_hash_lookup?hash=<%=field.substring( 0, ndx )%>">
+            <%=field.substring( 0, ndx )%>
+         </a><br>
+         <%
+      }
+   }
+%>
+</blockquote>
 
 <jsp:include page="/include/footer.html"/>
 

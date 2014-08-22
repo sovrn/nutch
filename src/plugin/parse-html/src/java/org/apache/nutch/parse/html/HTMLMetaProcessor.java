@@ -42,13 +42,18 @@ public class HTMLMetaProcessor {
    */
   public static final void getMetaTags (
     HTMLMetaTags metaTags, Node node, URL currURL) {
+      getMetaTags(metaTags, node, currURL, false);
+  }
+
+  public static final void getMetaTags (
+    HTMLMetaTags metaTags, Node node, URL currURL, boolean ignoreRobotDirectives) {
 
     metaTags.reset();
-    getMetaTagsHelper(metaTags, node, currURL);
+    getMetaTagsHelper(metaTags, node, currURL, ignoreRobotDirectives);
   }
 
   private static final void getMetaTagsHelper(
-    HTMLMetaTags metaTags, Node node, URL currURL) {
+    HTMLMetaTags metaTags, Node node, URL currURL, boolean ignoreRobotDirectives) {
 
     if (node.getNodeType() == Node.ELEMENT_NODE) {
 
@@ -75,7 +80,9 @@ public class HTMLMetaProcessor {
           }
         }
         
-        if (nameNode != null) {
+        // LIJIT: This section deals only with robots meta data, so if we're ignoring
+        //  such metadata, don't bother with any of the code here
+        if (!ignoreRobotDirectives && nameNode != null) {
           if (contentNode != null) {
             String name = nameNode.getNodeValue().toLowerCase();
             metaTags.getGeneralTags().setProperty(name, contentNode.getNodeValue());
@@ -205,7 +212,7 @@ public class HTMLMetaProcessor {
     if (children != null) {
       int len = children.getLength();
       for (int i = 0; i < len; i++) {
-        getMetaTagsHelper(metaTags, children.item(i), currURL);
+        getMetaTagsHelper(metaTags, children.item(i), currURL, ignoreRobotDirectives);
       }
     }
   }

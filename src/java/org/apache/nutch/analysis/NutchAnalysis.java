@@ -17,7 +17,7 @@ import java.util.*;
 /** The JavaCC-generated Nutch lexical analyzer and query parser. */
 public class NutchAnalysis implements NutchAnalysisConstants {
 
-  private static final String[] STOP_WORDS = {
+  private static final String[] DEFAULT_STOP_WORDS = {
     "a", "and", "are", "as", "at", "be", "but", "by",
     "for", "if", "in", "into", "is", "it",
     "no", "not", "of", "on", "or", "s", "such",
@@ -25,7 +25,16 @@ public class NutchAnalysis implements NutchAnalysisConstants {
     "they", "this", "to", "was", "will", "with"
   };
 
-  private static final Set STOP_SET = StopFilter.makeStopSet(STOP_WORDS);
+  private static Set STOP_SET = null;
+
+  public static synchronized void initStopWords( Configuration conf ){
+    if ( STOP_SET == null ) {
+      String[] stops = conf.getStrings( "nutch.analysis.stopwords" );
+      if ( stops == null )
+         stops = DEFAULT_STOP_WORDS;
+      STOP_SET = StopFilter.makeStopSet( stops );
+    }
+  }
 
   private Analyzer analyzer = null;
   private String queryString;
@@ -71,6 +80,10 @@ public class NutchAnalysis implements NutchAnalysisConstants {
 
 /** Parse a query. */
   final public Query parse(Configuration conf) throws ParseException {
+
+  if ( STOP_SET == null )
+    initStopWords( conf );
+
   Query query = new Query(conf);
   ArrayList terms;
   Token token;

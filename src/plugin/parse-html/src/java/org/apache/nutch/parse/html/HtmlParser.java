@@ -98,6 +98,8 @@ public class HtmlParser implements Parser {
 
   private Configuration conf;
   
+  private String[] robotsExceptions;
+
   private DOMContentUtils utils;
 
   private HtmlParseFilters htmlParseFilters;
@@ -177,11 +179,15 @@ public class HtmlParser implements Parser {
       return new ParseStatus(e).getEmptyParse(getConf());
     }
       
+    // See if it's OK for us to ignore robots meta directives for this specific page
+    boolean ignoreRobotDirectives = RobotsExceptions.okToIgnore( robotsExceptions, content.getUrl() );
+
     // get meta directives
-    HTMLMetaProcessor.getMetaTags(metaTags, root, base);
+    HTMLMetaProcessor.getMetaTags(metaTags, root, base, ignoreRobotDirectives);
     if (LOG.isTraceEnabled()) {
       LOG.trace("Meta tags for " + base + ": " + metaTags.toString());
     }
+
     // check meta directives
     if (!metaTags.getNoIndex()) {               // okay to index
       StringBuffer sb = new StringBuffer();
@@ -198,7 +204,7 @@ public class HtmlParser implements Parser {
       ArrayList l = new ArrayList();              // extract outlinks
       URL baseTag = utils.getBase(root);
       if (LOG.isTraceEnabled()) { LOG.trace("Getting links..."); }
-      utils.getOutlinks(baseTag!=null?baseTag:base, l, root);
+      utils.getOutlinks(baseTag!=null?baseTag:base, l, root, robotsExceptions);
       outlinks = (Outlink[])l.toArray(new Outlink[l.size()]);
       if (LOG.isTraceEnabled()) {
         LOG.trace("found "+outlinks.length+" outlinks in "+content.getUrl());
@@ -307,6 +313,7 @@ public class HtmlParser implements Parser {
     this.utils = new DOMContentUtils(conf);
     this.cachingPolicy = getConf().get("parser.caching.forbidden.policy",
         Nutch.CACHING_FORBIDDEN_CONTENT);
+    this.robotsExceptions = RobotsExceptions.getRobotsExceptions( conf );
   }
 
   public Configuration getConf() {

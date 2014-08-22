@@ -26,6 +26,7 @@ import java.net.URLDecoder;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Hashtable;
+import java.util.Iterator;
 import java.util.StringTokenizer;
 
 // Commons Logging imports
@@ -39,6 +40,7 @@ import org.apache.nutch.crawl.CrawlDatum;
 import org.apache.nutch.net.protocols.Response;
 import org.apache.nutch.protocol.ProtocolException;
 import org.apache.nutch.protocol.RobotRules;
+import org.apache.nutch.util.RobotsExceptions;
 
 
 /**
@@ -55,6 +57,8 @@ public class RobotRulesParser implements Configurable {
   public static final Log LOG = LogFactory.getLog(RobotRulesParser.class);
 
   private boolean allowForbidden = false;
+
+  private boolean allowPartialAgentMatch = false;
 
   private static final Hashtable CACHE = new Hashtable();
   
@@ -73,8 +77,7 @@ public class RobotRulesParser implements Configurable {
    * file, and can test paths against those rules.
    */
   public static class RobotRuleSet implements RobotRules {
-    ArrayList tmpEntries = new ArrayList();
-    RobotsEntry[] entries = null;
+    ArrayList entries = new ArrayList();
     long expireTime;
     long crawlDelay = -1;
 
@@ -83,37 +86,36 @@ public class RobotRulesParser implements Configurable {
     private class RobotsEntry {
       String prefix;
       boolean allowed;
+      boolean ignoreCrawlDelay = false;
 
-      RobotsEntry(String prefix, boolean allowed) {
+      RobotsEntry(String prefix, boolean allowed, boolean ignoreDelay) {
         this.prefix= prefix;
         this.allowed= allowed;
+        this.ignoreCrawlDelay = ignoreDelay;
       }
     }
 
     /**
      */
     private void addPrefix(String prefix, boolean allow) {
-      if (tmpEntries == null) {
-        tmpEntries= new ArrayList();
-        if (entries != null) {
-          for (int i= 0; i < entries.length; i++) 
-            tmpEntries.add(entries[i]);
-        }
-        entries= null;
-      }
+      entries.add(new RobotsEntry(prefix, allow, false));
+    }
 
-      tmpEntries.add(new RobotsEntry(prefix, allow));
+    /**
+     * Add an exception path to robots.txt.  These are high priority
+     * "allow" paths that override any other "disallow" paths actually
+     * in the robots.txt file.  Put them at the front of the tmpEntries
+     * ArrayList so they're evaluated first.
+     */
+    private void addExceptionPrefix( String prefix )
+    {
+      entries.add( 0, new RobotsEntry( prefix, true, true ) );
     }
 
     /**
      */
     private void clearPrefixes() {
-      if (tmpEntries == null) {
-        tmpEntries= new ArrayList();
-        entries= null;
-      } else {
-        tmpEntries.clear();
-      }
+      entries.clear();
     }
 
     /**
@@ -134,6 +136,13 @@ public class RobotRulesParser implements Configurable {
      * Get Crawl-Delay, in milliseconds. This returns -1 if not set.
      */
     public long getCrawlDelay() {
+      return getCrawlDelay( null );
+    }
+
+    public long getCrawlDelay(URL url) {
+      RobotsEntry entry = getEntry( getPath( url ) );
+      if ( entry != null && entry.ignoreCrawlDelay )
+        return( 0 );
       return crawlDelay;
     }
     
@@ -150,11 +159,7 @@ public class RobotRulesParser implements Configurable {
      *  <code>true</code> otherwise.
      */
     public boolean isAllowed(URL url) {
-      String path = url.getPath();                  // check rules
-      if ((path == null) || "".equals(path)) {
-        path= "/";
-      }
-      return isAllowed(path);
+      return isAllowed( getPath( url ) );
     }
     
     /** 
@@ -170,22 +175,23 @@ public class RobotRulesParser implements Configurable {
         // path prefixes
       }
       
-      if (entries == null) {
-        entries= new RobotsEntry[tmpEntries.size()];
-        entries= (RobotsEntry[]) 
-          tmpEntries.toArray(entries);
-        tmpEntries= null;
-      }
-
-      int pos= 0;
-      int end= entries.length;
-      while (pos < end) {
-        if (path.startsWith(entries[pos].prefix))
-          return entries[pos].allowed;
-        pos++;
-      }
+      RobotsEntry entry = getEntry( path );
+      if ( entry != null )
+         return( entry.allowed );
 
       return true;
+    }
+
+    private RobotsEntry getEntry( String path )
+    {
+      Iterator i = entries.iterator();
+      while ( i.hasNext() )
+      {
+        RobotsEntry entry = (RobotsEntry)i.next();
+        if ( path.startsWith( entry.prefix ) )
+          return( entry );
+      }
+      return( null );
     }
 
     /**
@@ -193,13 +199,15 @@ public class RobotRulesParser implements Configurable {
     public String toString() {
       isAllowed("x");  // force String[] representation
       StringBuffer buf= new StringBuffer();
-      for (int i= 0; i < entries.length; i++) 
-        if (entries[i].allowed)
-          buf.append("Allow: " + entries[i].prefix
-                     + System.getProperty("line.separator"));
+      Iterator i = entries.iterator();
+      while ( i.hasNext() )
+      {
+        RobotsEntry entry = (RobotsEntry)i.next();
+        if (entry.allowed)
+          buf.append("Allow: " + entry.prefix + System.getProperty("line.separator"));
         else 
-          buf.append("Disallow: " + entries[i].prefix
-                     + System.getProperty("line.separator"));
+          buf.append("Disallow: " + entry.prefix + System.getProperty("line.separator"));
+      }
       return buf.toString();
     }
   }
@@ -218,6 +226,9 @@ public class RobotRulesParser implements Configurable {
 
   public void setConf(Configuration conf) {
     this.conf = conf;
+
+    allowPartialAgentMatch = conf.getBoolean("http.robots.allowPartialAgentMatch", false);
+
     allowForbidden = conf.getBoolean("http.robots.403.allow", false);
     //
     // Grab the agent names we advertise to robots files.
@@ -330,13 +341,17 @@ public class RobotRulesParser implements Configurable {
 
         String agentNames= line.substring(line.indexOf(":") + 1);
         agentNames= agentNames.trim();
-        StringTokenizer agentTokenizer= new StringTokenizer(agentNames);
+        StringTokenizer agentTokenizer= new StringTokenizer(agentNames,",");
 
         while (agentTokenizer.hasMoreTokens()) {
           // for each agent listed, see if it's us:
           String agentName= agentTokenizer.nextToken().toLowerCase();
 
           Integer precedenceInt= (Integer) robotNames.get(agentName);
+
+          // If we didn't have an exact match on the agent name, try a fuzzy match (if so configured)
+          if ( precedenceInt == null && allowPartialAgentMatch )
+            precedenceInt = findMatchingName( agentName );
 
           if (precedenceInt != null) {
             int precedence= precedenceInt.intValue();
@@ -389,15 +404,18 @@ public class RobotRulesParser implements Configurable {
       } else if ( (line.length() >= 12)
                   && (line.substring(0, 12).equalsIgnoreCase("Crawl-Delay:"))) {
         doneAgents = true;
-        long crawlDelay = -1;
-        String delay = line.substring("Crawl-Delay:".length(), line.length()).trim();
-        if (delay.length() > 0) {
-          try {
-            crawlDelay = Long.parseLong(delay) * 1000; // sec to millisec
-          } catch (Exception e) {
-            LOG.info("can not parse Crawl-Delay:" + e.toString());
+        if ( addRules )
+        {
+          long crawlDelay = -1;
+          String delay = line.substring("Crawl-Delay:".length(), line.length()).trim();
+          if (delay.length() > 0) {
+            try {
+              crawlDelay = Long.parseLong(delay) * 1000; // sec to millisec
+            } catch (Exception e) {
+              LOG.info("can not parse Crawl-Delay:" + e.toString());
+            }
+            currentRules.setCrawlDelay(crawlDelay);
           }
-          currentRules.setCrawlDelay(crawlDelay);
         }
       }
     }
@@ -410,6 +428,38 @@ public class RobotRulesParser implements Configurable {
     if (bestPrecedenceSoFar == NO_PRECEDENCE) 
       return EMPTY_RULES;
     return bestRulesSoFar;
+  }
+  
+  /****************************************************************
+  * Find an entry in the robot names array (the names we go by) that
+  * matches the agent name we're currently working in the fetched
+  * robots.txt file.
+  *
+  * @param agentName  The string from the fetched robots.txt file
+  *
+  ****************************************************************/
+  private Integer findMatchingName( String agentName )
+  {  
+     Iterator i = robotNames.keySet().iterator();
+     while ( i.hasNext() )
+     {
+        String key = (String)i.next();
+        if ( key.indexOf(agentName) != -1 )
+           return( (Integer)robotNames.get( key ) );
+     }
+     return( null );
+  }
+  
+  /****************************************************************
+  *
+  ****************************************************************/
+  static String getPath( URL url )
+  {
+     String path = url.getPath();                  // check rules
+     if ((path == null) || "".equals(path)) {
+       path= "/";
+     }
+     return( path );
   }
 
   /**
@@ -462,8 +512,8 @@ public class RobotRulesParser implements Configurable {
         else if ( (response.getCode() == 403) && (!allowForbidden) )
           robotRules = FORBID_ALL_RULES;            // use forbid all
         else if (response.getCode() >= 500) {
-	  cacheRule = false;
-	  robotRules = EMPTY_RULES;
+          cacheRule = false;
+          robotRules = EMPTY_RULES;
         }else                                        
           robotRules = EMPTY_RULES;                 // use default rules
       } catch (Throwable t) {
@@ -474,33 +524,106 @@ public class RobotRulesParser implements Configurable {
         robotRules = EMPTY_RULES;
       }
 
+      addAllowExceptions( host, robotRules );
+
       if (cacheRule){
-	CACHE.put(host, robotRules);  // cache rules for host
+        CACHE.put(host, robotRules);  // cache rules for host
       }
     }
     return robotRules;
   }
 
+  /****************************************************************
+  *
+  ****************************************************************/
+  protected RobotRuleSet addAllowExceptions( String host, RobotRuleSet robotRules )
+  {
+     boolean rulesModified = false;
+
+     // Empty rules already permit all, so we don't need to do anything with them
+     if ( robotRules != EMPTY_RULES )
+     {
+        // Hosts are not case-sensitive, paths are.
+        host = host.toLowerCase();
+        LOG.debug( "Adding ignore rules for " + host );
+
+        // Overly pedantic way of doing this, but trying to make it clear what's going on
+        String wwwHost = host;
+        String nowwwHost = host;
+        if ( host.startsWith("www") )
+           nowwwHost = host.substring( 4 );
+        else
+           wwwHost = "www." + host;
+        LOG.debug( "wwwHost " + wwwHost );
+        LOG.debug( "nowwwHost " + nowwwHost );
+
+        // If one of the "ignore robots.txt" urls matches this host, either with
+        // or without the "www", add an explicit "allow" rule.
+        // Exception URLs must not have the protocol, and must have the host.
+        String[] paths = RobotsExceptions.getRobotsExceptions( conf );
+        for ( String path : paths )
+        {
+           try
+           {
+              LOG.debug( "Ignore path: " + path );
+
+              // Get the path's host.  If there's no /, it's just the host, so add a slash to
+              // create an empty path.
+              int ndx = path.indexOf( "/" );
+              if ( ndx < 0 )
+              {
+                 path = path + "/";
+                 ndx = path.indexOf( "/" );
+              }
+              String pathHost = path.substring( 0, ndx ).toLowerCase();
+              path = path.substring( ndx );
+
+              // Check the path against the host
+              if ( pathHost.equals( wwwHost ) || pathHost.equals( nowwwHost ) )
+              {
+                 // If the rules are the static "forbid all" instance, get a new instance so
+                 // we don't affect the forbid all rules for all other hosts.
+                 if ( robotRules == FORBID_ALL_RULES )
+                 {
+                    LOG.info( "Getting new instance of 'forbid all' rule set" );
+                    robotRules = getForbidAllRules();
+                 }
+
+                 // Add a "permit" rule for this host and path
+                 LOG.info( "Adding allow exception rule for " + host + ": " + path );
+                 robotRules.addExceptionPrefix( path );
+                 rulesModified = true;
+              }
+           }
+           catch ( Exception e )
+           {
+              LOG.error( "Exception loading rules exceptions", e );
+           }
+        }
+     }
+
+     if ( rulesModified )
+        LOG.info( "Robot rules for " + host + " after allow exceptions:\n" + robotRules );
+
+     return( robotRules );
+  }
+
   public boolean isAllowed(HttpBase http, URL url)
       throws ProtocolException, IOException {
-    String path = url.getPath();                  // check rules
-    if ((path == null) || "".equals(path)) {
-      path= "/";
-    }
-
+    String path = getPath( url );
     return getRobotRulesSet(http, url).isAllowed(path);
   }
   
   public long getCrawlDelay(HttpBase http, URL url)
       throws ProtocolException, IOException {
-    return getRobotRulesSet(http, url).getCrawlDelay();
+    return getRobotRulesSet(http, url).getCrawlDelay(url);
   }
 
   private final static int BUFSIZE= 2048;
 
   /** command-line main for testing */
   public static void main(String[] argv) {
-    if (argv.length != 3) {
+    if (argv.length < 3) {
       System.out.println("Usage:");
       System.out.println("   java <robots-file> <url-file> <agent-name>+");
       System.out.println("");
@@ -513,10 +636,14 @@ public class RobotRulesParser implements Configurable {
     try { 
       FileInputStream robotsIn= new FileInputStream(argv[0]);
       LineNumberReader testsIn= new LineNumberReader(new FileReader(argv[1]));
-      String[] robotNames= new String[argv.length - 1];
+      String[] robotNames= new String[argv.length-2];
 
-      for (int i= 0; i < argv.length - 2; i++) 
+      for (int i=0; i < robotNames.length; i++)
+      {
         robotNames[i]= argv[i+2];
+        System.out.println( "Testing robot name: " + robotNames[i] );
+      }
+      System.out.println();
 
       ArrayList bufs= new ArrayList();
       byte[] buf= new byte[BUFSIZE];
@@ -546,6 +673,7 @@ public class RobotRulesParser implements Configurable {
         pos+= currBufLen;
       }
 
+      //System.out.println( "Robots file contents:\n" + new String(robotsBytes) );
       RobotRulesParser parser= 
         new RobotRulesParser(robotNames);
       RobotRuleSet rules= parser.parseRules(robotsBytes);
@@ -555,9 +683,19 @@ public class RobotRulesParser implements Configurable {
 
       String testPath= testsIn.readLine().trim();
       while (testPath != null) {
-        System.out.println( (rules.isAllowed(testPath) ? 
-                             "allowed" : "not allowed")
-                            + ":\t" + testPath);
+        try
+        {
+          URL url = new URL( testPath );
+          System.out.println( (rules.isAllowed(url) ? 
+                               "allowed" : "not allowed")
+                              + ":\t" + url);
+        }
+        catch ( Exception e )
+        {
+          System.out.println( (rules.isAllowed(testPath) ? 
+                               "allowed" : "not allowed")
+                              + ":\t" + testPath);
+        }
         testPath= testsIn.readLine();
       }
 

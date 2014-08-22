@@ -1,3 +1,10 @@
+/*
+
+   CHANGES TO THE RELEASED VERSION OF THIS FILE ARE MARKED WITH
+   COMMENTS THAT SAY "LIJIT PATCH".
+*/   
+
+
 /**
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -39,7 +46,8 @@ import org.apache.nutch.protocol.*;
 import org.apache.nutch.parse.*;
 import org.apache.nutch.scoring.ScoringFilters;
 import org.apache.nutch.util.*;
-
+import org.apache.nutch.util.mime.MimeType;
+import org.apache.nutch.util.mime.MimeTypes;
 
 /** The fetcher. Most of the work is done by plugins. */
 public class Fetcher extends ToolBase implements MapRunnable { 
@@ -60,12 +68,14 @@ public class Fetcher extends ToolBase implements MapRunnable {
     }
   }
 
+  private int fatalFetcherErrors = 0;
+
   private RecordReader input;
   private OutputCollector output;
   private Reporter reporter;
 
   private String segmentName;
-  private int activeThreads;
+  private int activeThreads;                 // shouldn't this be static?
   private int maxRedirect;
 
   private long start = System.currentTimeMillis(); // start time of fetcher run
@@ -78,6 +88,8 @@ public class Fetcher extends ToolBase implements MapRunnable {
   private boolean storingContent;
   private boolean parsing;
 
+  private MimeTypes mimeTypes = MimeTypes.get( "mime-types.xml" );
+
   private class FetcherThread extends Thread {
     private Configuration conf;
     private URLFilters urlFilters;
@@ -87,8 +99,8 @@ public class Fetcher extends ToolBase implements MapRunnable {
     private ProtocolFactory protocolFactory;
 
     public FetcherThread(Configuration conf) {
-      this.setDaemon(true);                       // don't hang JVM on exit
-      this.setName("FetcherThread");              // use an informative name
+      this.setDaemon(true);                                       // don't hang JVM on exit
+      this.setName("FetcherThread" + activeThreads);              // use an informative name
       this.conf = conf;
       this.urlFilters = new URLFilters(conf);
       this.scfilters = new ScoringFilters(conf);
@@ -98,7 +110,10 @@ public class Fetcher extends ToolBase implements MapRunnable {
     }
 
     public void run() {
-      synchronized (Fetcher.this) {activeThreads++;} // count threads
+      synchronized (Fetcher.this) 
+      {
+         activeThreads++;
+      } // count threads
       
       try {
         Text key = new Text();
@@ -145,11 +160,19 @@ public class Fetcher extends ToolBase implements MapRunnable {
               ProtocolOutput output = protocol.getProtocolOutput(url, datum);
               ProtocolStatus status = output.getStatus();
               Content content = output.getContent();
+
               ParseStatus pstatus = null;
+
+              if (LOG.isDebugEnabled())
+                 LOG.debug( "DONE fetching " + url + " (" + status + ")" );
 
               switch(status.getCode()) {
 
               case ProtocolStatus.SUCCESS:        // got a page
+                /* LIJIT PATCH: try to figure out content type for this fetched resource */
+                checkContentType( content, url, "text/html" );
+                /* end LIJIT PATCH */
+
                 pstatus = output(url, datum, content, status, CrawlDatum.STATUS_FETCH_SUCCESS);
                 updateStatus(content.getContent().length);
                 if (pstatus != null && pstatus.isSuccess() &&
@@ -182,6 +205,21 @@ public class Fetcher extends ToolBase implements MapRunnable {
 
               case ProtocolStatus.MOVED:         // redirect
               case ProtocolStatus.TEMP_MOVED:
+
+                /* LIJIT PATCH: *********************************************/
+
+                // Make sure that content type is not null 
+                if ( content != null && content.getContentType() == null )
+                  content.setContentType( "" );
+
+                // If we are crawling a whole site, and the page is temp moved, the 
+                // fetch list generator might keep including the page in subsequent
+                // fetch lists.  So for our purposes, everything is a permanent move,
+                // because we don't want to keep fetching the same (moved) page.
+                status.setCode( ProtocolStatus.MOVED );
+
+                /* end LIJIT PATCH */
+
                 int code;
                 if (status.getCode() == ProtocolStatus.MOVED) {
                   code = CrawlDatum.STATUS_FETCH_REDIR_PERM;
@@ -220,10 +258,20 @@ public class Fetcher extends ToolBase implements MapRunnable {
                 datum.setRetriesSinceFetch(datum.getRetriesSinceFetch()+1);
               /* FALLTHROUGH */
               // intermittent blocking - retry without increasing the counter
-              case ProtocolStatus.WOULDBLOCK:
               case ProtocolStatus.BLOCKED:
                 output(url, datum, null, status, CrawlDatum.STATUS_FETCH_RETRY);
                 break;
+              /* LIJIT PATCH: *********************************************/
+              /*     Do not handle WOULDBLOCK like BLOCKED.  WOULDBLOCK means we
+                     should not crawl that site at all because the site's robots.txt
+                     file indicates a crawl delay > than our max delay.  
+                     Really, though, we could crawl a single page, and ignore the rest
+                     of the site.  This is a Nutch problem...    */
+              case ProtocolStatus.WOULDBLOCK:
+                LOG.info( "Site crawl delay is larger than our max delay: " + url );
+                output(url, datum, null, status, CrawlDatum.STATUS_FETCH_GONE);
+                break;
+              /* end LIJIT PATCH */
                 
               // permanent failures
               case ProtocolStatus.GONE:           // gone
@@ -249,24 +297,75 @@ public class Fetcher extends ToolBase implements MapRunnable {
               }
 
             } while (redirecting && (redirectCount < maxRedirect));
+            
+          // LIJIT:
+          } catch ( OutOfMemoryError ome ) {
 
-            
+             // OOME's are really bad and can't be tolerated, so don't let 'em be caught
+             throw( ome );
+          // end LIJIT
           } catch (Throwable t) {                 // unexpected exception
+             /* LIJIT PATCH: Don't retry under certain painful conditions...
+                            Log the stack trace for the throwable */
+            LOG.error( "Unexpected throwable caught in Fetch: ", t );
+            ProtocolStatus protocolStatus = null;
+            byte crawlStatus = CrawlDatum.STATUS_FETCH_RETRY;
+            if ( t instanceof ProtocolNotFound ||
+                 t instanceof ParseException ||
+                 t instanceof NullPointerException )
+            {
+              LOG.error( "WILL NOT retry the fetch." );
+              crawlStatus = CrawlDatum.STATUS_FETCH_GONE;
+              protocolStatus = ProtocolStatus.STATUS_NOTFOUND;
+
+            }
+            /* end LIJIT PATCH */
             logError(url, t.toString());
-            output(url, datum, null, null, CrawlDatum.STATUS_FETCH_RETRY);
-            
+            output(url, datum, null, protocolStatus, crawlStatus);
           }
         }
 
+      // LIJIT:
+      } catch ( OutOfMemoryError ome ) {
+
+         LOG.fatal( "OUT OF MEMORY!\n" );
+         ome.printStackTrace( LogUtil.getFatalStream(LOG) );
+         fatalFetcherErrors++;
+      // end LIJIT
       } catch (Throwable e) {
         if (LOG.isFatalEnabled()) {
-          e.printStackTrace(LogUtil.getFatalStream(LOG));
           LOG.fatal("fetcher caught:"+e.toString());
+          e.printStackTrace(LogUtil.getFatalStream(LOG));
         }
       } finally {
         synchronized (Fetcher.this) {activeThreads--;} // count threads
       }
     }
+
+    /* LIJIT PATCH: ensure content type is not null */
+    private void checkContentType( Content content, Text url, String defVal )
+    {
+      if ( content != null && content.getContentType() == null )
+      {
+        String contentType = defVal;
+        MimeType type = mimeTypes.getMimeType( url.toString() );
+        if ( type == null )
+        {
+          LOG.info( "Can't determine mime type from extension; looking at content: " + url );
+          /* byte[] cc = content.getContent(); int len = ( cc.length > 60 ? 60 : cc.length ); LOG.info( "Content (" + cc.length + " bytes): " + new String( cc, 0, len ) );*/
+          type = mimeTypes.getMimeType( content.getContent() );
+        }
+
+        if ( type != null )
+          contentType = type.getName();
+
+        LOG.warn( "Set content type to " + contentType );
+        content.setContentType( contentType );
+      }
+      else
+        LOG.debug( "content type is " + content.getContentType() + "; " + url );
+    }
+    /* end LIJIT PATCH */
 
     private void logError(Text url, String message) {
       if (LOG.isInfoEnabled()) {
@@ -278,7 +377,7 @@ public class Fetcher extends ToolBase implements MapRunnable {
     }
 
     private ParseStatus output(Text key, CrawlDatum datum,
-                        Content content, ProtocolStatus pstatus, int status) {
+                        Content content, ProtocolStatus pstatus, int status) throws ParseException {
 
       datum.setStatus(status);
       datum.setFetchTime(System.currentTimeMillis());
@@ -308,6 +407,14 @@ public class Fetcher extends ToolBase implements MapRunnable {
           parse = this.parseUtil.parse(content);
           parseStatus = parse.getData().getStatus();
         } catch (Exception e) {
+
+          /* LIJIT PATCH: Bail out if there's a Parse Exception, log anything else */
+           if ( e instanceof ParseException )
+              throw (ParseException)e;
+
+          LOG.warn( "Error parsing: " + key, e );
+          /* end LIJIT PATCH   */
+
           parseStatus = new ParseStatus(e);
         }
         if (!parseStatus.isSuccess()) {
@@ -406,6 +513,7 @@ public class Fetcher extends ToolBase implements MapRunnable {
     this.input = input;
     this.output = output;
     this.reporter = reporter;
+    this.fatalFetcherErrors = 0;
 
     this.maxRedirect = getConf().getInt("http.redirect.max", 3);
     
@@ -432,12 +540,17 @@ public class Fetcher extends ToolBase implements MapRunnable {
           if (LOG.isWarnEnabled()) {
             LOG.warn("Aborting with "+activeThreads+" hung threads.");
           }
-          return;
+          break;
         }
       }
 
     } while (activeThreads > 0);
-    
+
+    // LIJIT: sometimes fetchers die for genuine problems.  Right now that's
+    // only OutOfMemoryError, but perhaps later there'll be more reasons.
+    if ( fatalFetcherErrors > 0 )
+       throw new IOException( "Some fetchers got truly fatal errors; killing everything." );
+    // end LIJIT
   }
 
   public void fetch(Path segment, int threads)

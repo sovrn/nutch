@@ -22,6 +22,7 @@ import java.net.MalformedURLException;
 import java.util.ArrayList;
 import java.util.HashMap;
 
+import org.apache.nutch.util.RobotsExceptions;
 import org.apache.nutch.parse.Outlink;
 import org.apache.hadoop.conf.Configuration;
 
@@ -344,6 +345,11 @@ public class DOMContentUtils {
    */
   public void getOutlinks(URL base, ArrayList outlinks, 
                                        Node node) {
+     getOutlinks(base, outlinks, node, new String[]{});
+  }
+
+  public void getOutlinks(URL base, ArrayList outlinks, 
+                                       Node node, String[]robotsExceptions) {
 
     NodeList children = node.getChildNodes();
     int childLen= 0;
@@ -376,12 +382,18 @@ public class DOMContentUtils {
               post = true;
             }
           }
-          if (target != null && !noFollow && !post)
+          if (target != null && !post)
             try {
               
               URL url = (base.toString().indexOf(';') > 0) ? 
                 fixEmbeddedParams(base, target) :  new URL(base, target);
-              outlinks.add(new Outlink(url.toString(),
+             
+              // LIJIT: check to see if we ignore the "nofollow" attribute
+              if (noFollow)
+                noFollow = !RobotsExceptions.okToIgnore( robotsExceptions, url.toString() );
+             
+              if (!noFollow)
+                outlinks.add(new Outlink(url.toString(),
                                        linkText.toString().trim(), conf));
             } catch (MalformedURLException e) {
               // don't care
@@ -392,7 +404,7 @@ public class DOMContentUtils {
       }
     }
     for ( int i = 0; i < childLen; i++ ) {
-      getOutlinks(base, outlinks, children.item(i));
+      getOutlinks(base, outlinks, children.item(i), robotsExceptions);
     }
   }
 
