@@ -522,6 +522,14 @@
   <!--                                                                    -->
   <!-- ================================================================== -->
   <target name="package" depends="jar, job, war, javadoc">
+    <taskdef name="deb" classname="org.vafer.jdeb.ant.DebAntTask">
+    	<classpath>
+    	<fileset dir="ant">
+    		<include name="*.jar"/>
+    	</fileset>
+    	</classpath>
+  	</taskdef>
+    	
     <mkdir dir="${dist.dir}"/>
     <mkdir dir="${dist.dir}/lib"/>
     <mkdir dir="${dist.dir}/bin"/>
@@ -577,6 +585,20 @@
 
     <copy todir="${dist.dir}/" file="build.xml"/>
     <copy todir="${dist.dir}/" file="default.properties"/>
+  	
+  	 <copy todir="${deb}/control">
+  	      <fileset dir="src/main/resources/deb/control"/>
+  	      <filterset begintoken="[[" endtoken="]]">
+  	        <filter token="version" value="${version}"/>
+  	        <filter token="name" value="${ant.project.name}"/>
+  	      </filterset>
+  	  </copy>
+  	
+  	<deb destfile="lijit-nutch-${version}.deb" control="${deb}/control">
+  	      <data src="src/main/resources/deb/data">
+  	        <exclude name="**/.svn"/>
+  	      </data>
+  	    </deb>
 
   </target>
 
