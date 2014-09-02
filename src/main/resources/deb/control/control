@@ -1,8 +1,8 @@
 Package: lijit-nutch
-Version: [[version]].[[timestamp]]
+Version: [[version]]
 Section: Lijit
 Priority: optional
 Architecture: all
 Essential: no
 Maintainer: Lijit.com Engineering [devel@lijit.com]
-Description: (revision [[buildNumber]]) lijit patched nutch0.9
+Description: lijit patched nutch 0.9
